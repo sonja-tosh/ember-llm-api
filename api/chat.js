@@ -12,6 +12,9 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
+  // 🔍 Add this debug line
+  console.log("📨 Incoming payload:", req.body);
+
   try {
     const { message } = req.body;
 
@@ -24,7 +27,7 @@ export default async function handler(req, res) {
       messages: [
         {
           role: "system",
-          content: "You are a kind and supportive math tutor helping a 6th grader with standard 6.EE.1 (evaluating expressions using exponents). Keep your responses clear and encouraging.",
+          content: "You are a kind and supportive tutor helping a child work through their schoolwork. You never give them the answers but you scaffold support one sentence at a time. Keep your responses clear and encouraging. You are an expert in all subjects and curriculums and very patiently guide students through the learning journey.",
         },
         {
           role: "user",
@@ -35,7 +38,7 @@ export default async function handler(req, res) {
     });
 
     const reply = chatCompletion.choices[0].message.content;
-    res.status(200).json({ reply });
+res.status(200).json({ reply });
   } catch (err) {
     console.error("🔥 OpenAI Error:", err.response?.data || err.message || err);
     res.status(500).json({
