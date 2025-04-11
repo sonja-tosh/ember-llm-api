@@ -6,34 +6,36 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 
 export default async function handler(req, res) {
-  // Enable CORS
+  // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  // Handle preflight request
+  // Handle preflight (CORS)
   if (req.method === "OPTIONS") {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  const { message } = req.body;
+
+  if (!message || typeof message !== "string") {
+    return res.status(400).json({ error: "Invalid or missing 'message'" });
   }
 
   try {
-    const { message } = req.body;
-
-    if (!message || typeof message !== "string") {
-      console.error("Missing or invalid message in request body");
-      return res.status(400).json({ error: "Message must be a string." });
-    }
-
     const completion = await openai.createChatCompletion({
       model: "gpt-4",
       messages: [
         {
           role: "system",
-          content: "You are a kind and supportive math tutor helping a 6th grader with standard 6.EE.1 (evaluating expressions using exponents). Keep your responses clear and encouraging.",
+          content:
+            "You are a kind and supportive math tutor helping a 6th grader with standard 6.EE.1 (evaluating expressions using exponents). Keep your responses clear and encouraging.",
         },
         {
           role: "user",
@@ -46,8 +48,8 @@ export default async function handler(req, res) {
 
     const reply = completion.data.choices[0].message.content;
     res.status(200).json({ reply });
-  } catch (error) {
-    console.error("OpenAI API Error:", error?.response?.data || error.message || error);
-    res.status(500).json({ error: "Internal server error" });
+  } catch (err) {
+    console.error("OpenAI API Error:", err.response?.data || err.message || err);
+    res.status(500).json({ error: "Something went wrong with the LLM." });
   }
 }
