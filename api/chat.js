@@ -51,5 +51,6 @@ export default async function handler(req, res) {
     console.error("Error with OpenAI API:", error);
     res.status(500).json({ error: "Internal server error" });
   }
+}
 
   // Optional: Log the request and response for debugging
