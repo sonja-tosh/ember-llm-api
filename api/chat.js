@@ -6,6 +6,16 @@ const configuration = new Configuration({
 const openai = new OpenAIApi(configuration);
 
 export default async function handler(req, res) {
+  // ✅ Add CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // ✅ Handle preflight request
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -19,9 +29,12 @@ export default async function handler(req, res) {
     const completion = await openai.createChatCompletion({
       model: "gpt-4",
       messages: [
-        { role: "system", content: "You are a friendly math tutor helping a 6th grader with exponents (6.EE.1)." },
-        { role: "user", content: message }
-      ]
+        {
+          role: "system",
+          content: "You are a helpful, supportive 6th grade math tutor focused on exponents and evaluating expressions.",
+        },
+        { role: "user", content: message },
+      ],
     });
 
     const reply = completion.data.choices[0].message.content;
