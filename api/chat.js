@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  // Handle preflight OPTIONS request
+  // Handle preflight request
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -32,26 +32,24 @@ export default async function handler(req, res) {
       messages: [
         {
           role: "system",
-          content: "You are a kind and supportive math tutor helping a 6th grader with standard 6.EE.1 (evaluating expressions using exponents). Keep your responses clear and encouraging.",
+          content:
+            "You are a kind and supportive math tutor helping a 6th grader with standard 6.EE.1 (evaluating expressions using exponents). Keep your responses clear and encouraging.",
         },
         {
           role: "user",
           content: message,
         },
       ],
-      max_tokens: 100,
+      max_tokens: 150,
       temperature: 0.7,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0,
-      stop: null,
     });
-    const responseMessage = completion.data.choices[0].message.content;
-    res.status(200).json({ message: responseMessage });
+
+    const reply = completion.data.choices[0].message.content;
+    res.status(200).json({ reply });
+
+  } catch (error) {
+    console.error("Error with OpenAI API:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
-  catch (error) {
-    console.error("Error:", error);
-    res.status(500).json({ error: "An error occurred while processing your request." });
-  }
-}
-// This code sets up an API route in a Next.js application that handles POST requests to interact with the OpenAI API.
+
+  // Optional: Log the request and response for debugging
