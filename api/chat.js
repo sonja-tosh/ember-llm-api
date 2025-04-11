@@ -1,27 +1,27 @@
-import 'dotenv/config';
 import OpenAI from "openai";
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY, // Make sure this is set in Vercel
 });
 
 export default async function handler(req, res) {
+  // Enable CORS for frontend like Canvas
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
+  // Handle preflight
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  // 🔍 Add this debug line
-  console.log("📨 Incoming payload:", req.body);
+  const { message } = req.body;
+
+  if (!message || typeof message !== "string") {
+    return res.status(400).json({ error: "Invalid or missing 'message'" });
+  }
 
   try {
-    const { message } = req.body;
-
-    if (!message || typeof message !== "string") {
-      return res.status(400).json({ error: "Invalid or missing 'message'" });
-    }
+    console.log("📨 Incoming message:", message);
 
     const chatCompletion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
@@ -38,12 +38,13 @@ export default async function handler(req, res) {
       max_tokens: 150,
     });
 
-    const reply = chatCompletion.choices[0].message.content;
-res.status(200).json({ reply });
+    const reply = chatCompletion.choices?.[0]?.message?.content || "[No reply received]";
+    console.log("💬 Tutor reply:", reply);
+    res.status(200).json({ reply });
   } catch (err) {
-    console.error("🔥 OpenAI Error:", err.response?.data || err.message || err);
+    console.error("🔥 OpenAI API Error:", err);
     res.status(500).json({
-      error: "OpenAI API call failed: " + (err.response?.data?.error?.message || err.message || "Unknown"),
+      error: "OpenAI API call failed: " + (err?.response?.data?.error?.message || err.message || "Unknown error"),
     });
   }
 }
