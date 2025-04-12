@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>EMBER Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)']] },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    iframe {
+      flex: 1;
+      border: none;
+    }
+    #chat-container {
+      width: 400px;
+      background-color: #512b7e;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      overflow: hidden;
+      position: relative;
+    }
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+    .message {
+      margin: 10px 0;
+    }
+    .user { font-weight: bold; }
+    .bot { color: #c0afff; }
+    #input-row {
+      display: flex;
+      gap: 8px;
+    }
+    #input {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      border-radius: 4px;
+    }
+    #sendButton {
+      padding: 8px 12px;
+      background-color: #ffffff;
+      color: #512b7e;
+      font-weight: bold;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #sendButton:hover {
+      background-color: #e6e6e6;
+    }
+    #mute-toggle {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      background: none;
+      border: none;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #mute-toggle:hover {
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <iframe src="worksheet.html"></iframe>
+
+  <div id="chat-container">
+    <button id="mute-toggle">🔊</button>
+    <div id="chat"></div>
+    <div id="input-row">
+      <input id="input" type="text" placeholder="Type your message..." />
+      <button id="sendButton">Send</button>
+    </div>
+  </div>
+
+  <script>
+    let lastScreenshotTime = 0;
+    let lastMessageSent = "";
+    let lastEditedProblem = null;
+    let pauseTimer;
+    let isMuted = false;
+    let audioQueue = [];
+    let isPlayingAudio = false;
+
+    const muteToggle = document.getElementById('mute-toggle');
+    muteToggle.addEventListener('click', () => {
+      isMuted = !isMuted;
+      muteToggle.textContent = isMuted ? '🔇' : '🔊';
+    });
+
+    function playAudio(url) {
+      if (!url || isMuted) return;
+      audioQueue.push(url);
+      if (!isPlayingAudio) playNextAudio();
+    }
+
+    function playNextAudio() {
+      if (audioQueue.length === 0) {
+        isPlayingAudio = false;
+        return;
+      }
+      const url = audioQueue.shift();
+      const audio = new Audio(url);
+      isPlayingAudio = true;
+      audio.addEventListener('ended', () => {
+        isPlayingAudio = false;
+        playNextAudio();
+      });
+      audio.play();
+    }
+
+    async function captureIframeAndSend(message) {
+      const now = Date.now();
+      if (now - lastScreenshotTime < 5000) return;
+      if (message === lastMessageSent) return;
+
+      lastScreenshotTime = now;
+      lastMessageSent = message;
+
+      const input = document.getElementById('input');
+      const chat = document.getElementById('chat');
+      const iframe = document.querySelector('iframe');
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+
+      if (!iframeDoc) return;
+
+      const answers = {};
+      const textareas = iframeDoc.querySelectorAll('textarea');
+      textareas.forEach((ta, index) => {
+        const label = ta.getAttribute('data-label') || `Problem ${index + 1}`;
+        answers[label] = ta.value.trim();
+      });
+
+      const lower = message.toLowerCase();
+      const isSystemMessage =
+        lower.includes("student") ||
+        lower.includes("worksheet") ||
+        lower.includes("scaffold") ||
+        lower.includes("stopped working") ||
+        lower.includes("analyze the image");
+
+      if (!isSystemMessage) {
+        chat.innerHTML += `<div class="message user">You: ${message}</div>`;
+      }
+
+      try {
+        const canvas = await html2canvas(iframeDoc.body);
+        const imgData = canvas.toDataURL('image/png');
+
+        const res = await fetch('http://localhost:3001/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message,
+            image: imgData,
+            answers,
+            lastEditedProblem
+          })
+        });
+
+        const data = await res.json();
+        chat.innerHTML += `<div class="message bot">EMBER: ${data.response}</div>`;
+        input.value = '';
+        chat.scrollTop = chat.scrollHeight;
+
+        // ✅ Re-render MathJax formulas
+        if (window.MathJax) {
+          MathJax.typesetPromise([chat]);
+        }
+
+        if (data.audioUrl) {
+          const timestampedUrl = `${data.audioUrl}?t=${Date.now()}`;
+          playAudio(timestampedUrl);
+        }
+
+      } catch (err) {
+        console.error('❌ Error capturing iframe:', err);
+        chat.innerHTML += `<div class="message bot">EMBER: Sorry, I couldn’t capture the worksheet.</div>`;
+      }
+    }
+
+    function triggerHelpMessage() {
+      const message = "I paused for a bit. I may be stuck or unsure. Please analyze the image and give me gentle support.";
+      captureIframeAndSend(message);
+    }
+
+    function setupIframeListeners() {
+      const iframe = document.querySelector('iframe');
+      iframe.addEventListener('load', () => {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        const textareas = iframeDoc.querySelectorAll('textarea');
+        textareas.forEach((ta, index) => {
+          const label = ta.getAttribute('data-label') || `Problem ${index + 1}`;
+          ta.addEventListener('input', () => {
+            lastEditedProblem = label;
+            clearTimeout(pauseTimer);
+            pauseTimer = setTimeout(triggerHelpMessage, 10000);
+            captureIframeAndSend("I updated the worksheet.");
+          });
+        });
+      });
+    }
+
+    async function playGreeting() {
+      try {
+        const res = await fetch('http://localhost:3001/api/greet');
+        const data = await res.json();
+        const chat = document.getElementById('chat');
+        chat.innerHTML += `<div class="message bot">EMBER: ${data.greeting}</div>`;
+        if (window.MathJax) {
+          MathJax.typesetPromise([chat]);
+        }
+        if (data.audioUrl && !isMuted) {
+          const timestampedUrl = `${data.audioUrl}?t=${Date.now()}`;
+          playAudio(timestampedUrl);
+        }
+      } catch (err) {
+        console.error("❌ Failed to load greeting", err);
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const sendButton = document.getElementById('sendButton');
+      const input = document.getElementById('input');
+
+      sendButton.addEventListener('click', () => {
+        const message = input.value.trim();
+        if (message) {
+          captureIframeAndSend(message);
+        }
+      });
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const message = input.value.trim();
+          if (message) {
+            captureIframeAndSend(message);
+          }
+        }
+      });
+
+      setupIframeListeners();
+      playGreeting();
+    });
+  </script>
+</body>
+</html>
