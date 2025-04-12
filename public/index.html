@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>EMBER Chat</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script>
     window.MathJax = {
@@ -132,7 +132,7 @@
 
     async function captureIframeAndSend(message) {
       const now = Date.now();
-      if (now - lastScreenshotTime < 5000) return;
+      if (now - lastScreenshotTime < 3000) return;
       if (message === lastMessageSent) return;
 
       lastScreenshotTime = now;
@@ -182,12 +182,13 @@
         const data = await res.json();
         chat.innerHTML += `<div class="message bot">EMBER: ${data.response}</div>`;
         input.value = '';
-        chat.scrollTop = chat.scrollHeight;
+        input.focus();
 
-        // ✅ Re-render MathJax formulas
         if (window.MathJax) {
-          MathJax.typesetPromise([chat]);
+          await MathJax.typesetPromise([chat]);
         }
+
+        chat.scrollTop = chat.scrollHeight;
 
         if (data.audioUrl) {
           const timestampedUrl = `${data.audioUrl}?t=${Date.now()}`;
@@ -201,8 +202,8 @@
     }
 
     function triggerHelpMessage() {
-      const message = "I paused for a bit. I may be stuck or unsure. Please analyze the image and give me gentle support.";
-      captureIframeAndSend(message);
+      const  message = 'Check my changes or work on the worksheet. Compare it with the last image I sent you. Respond to me as ember, as if you are standing over my shoulder watching my changes. You are EMBER, the worlds best math tutor. You are warm, encouraging, and extremely good at helping students learn through their thinking and problem solving. Youre helping a student named Sonja. Your tone is warm, responsive, and age-appropriate. Always scaffold slowly — only ask one question or make one comment at a time. Avoid long or complex instructions. Use clear, inline LaTeX math like \\(2^3\\), and don’t give answers away. Gently guide Sonja to think through the next step herself. If Sonja types a question or makes a guess, respond to it directly. Dont ignore it or continue your plan.';
+  captureIframeAndSend(message);
     }
 
     function setupIframeListeners() {
@@ -215,11 +216,12 @@
           ta.addEventListener('input', () => {
             lastEditedProblem = label;
             clearTimeout(pauseTimer);
-            pauseTimer = setTimeout(triggerHelpMessage, 10000);
-            captureIframeAndSend("I updated the worksheet.");
-          });
+            pauseTimer = setTimeout(triggerHelpMessage, 5000);
+            captureIframeAndSend('Check my changes or work on the worksheet. Compare it with the last image I sent you. Respond to me as ember, as if you are standing over my shoulder watching my changes. You are EMBER, the worlds best math tutor. You are warm, encouraging, and extremely good at helping students learn through their thinking and problem solving. Youre helping a student named Sonja. Your tone is warm, responsive, and age-appropriate. Always scaffold slowly — only ask one question or make one comment at a time. Avoid long or complex instructions. Use clear, inline LaTeX math like \\(2^3\\), and don’t give answers away. Gently guide Sonja to think through the next step herself. If Sonja types a question or makes a guess, respond to it directly. Dont ignore it or continue your plan.'
+  );
         });
       });
+    });
     }
 
     async function playGreeting() {
@@ -229,7 +231,7 @@
         const chat = document.getElementById('chat');
         chat.innerHTML += `<div class="message bot">EMBER: ${data.greeting}</div>`;
         if (window.MathJax) {
-          MathJax.typesetPromise([chat]);
+          await MathJax.typesetPromise([chat]);
         }
         if (data.audioUrl && !isMuted) {
           const timestampedUrl = `${data.audioUrl}?t=${Date.now()}`;
