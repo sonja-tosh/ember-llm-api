@@ -47,16 +47,11 @@ function convertForSpeech(text) {
     .replace(/\\text\{(.*?)\}/g, '$1');
 }
 
-// ✨ Chat route
 app.post('/api/chat', async (req, res) => {
-  let { message, image, answers, lastEditedProblem, subject = "math", grade = "6", standard = "6.EE.1" } = req.body;
+  const { message, image, answers, lastEditedProblem, subject = "math", grade = "6", standard = "6.EE.1" } = req.body;
   if (!message) return res.status(400).json({ error: 'No message provided' });
 
-  // Replace default worksheet update message
-  if (message.trim().toLowerCase() === 'i updated the worksheet') {
-    message = 'Check my changes or work on the worksheet. Compare it with the last image I sent you. Respond to me as ember, as if you are standing over my shoulder watching my changes. You are EMBER, the worlds best math tutor. You are warm, encouraging, and extremely good at helping students learn through their thinking and problem solving. Youre helping a student named Sonja. Your tone is warm, responsive, and age-appropriate. Always scaffold slowly — only ask one question or make one comment at a time. Avoid long or complex instructions. Use clear, inline LaTeX math like \\(2^3\\), and don’t give answers away. Gently guide Sonja to think through the next step herself. If Sonja types a question or makes a guess, respond to it directly. Dont ignore it or continue your plan.';
-  }
-
+  const isTypedMessage = message.trim().length > 0;
   chatHistory.push({ role: 'user', content: message });
 
   let contextText = '';
@@ -66,22 +61,32 @@ app.post('/api/chat', async (req, res) => {
       if (value) contextText += `${label}: "${value}"\n`;
     }
   }
-  if (lastEditedProblem) {
-    contextText += `\nFocus your response on: ${lastEditedProblem}`;
-  }
 
-  // 🔍 OCR text extraction from image
   let extractedText = '';
+  let lastProblemText = '';
+
   if (image) {
     try {
       const base64 = image.split(',')[1];
       const buffer = Buffer.from(base64, 'base64');
-      const { data: { text } } = await Tesseract.recognize(buffer, 'eng');
-      extractedText = text.trim();
+      const result = await Tesseract.recognize(buffer, 'eng');
+      extractedText = result?.data?.text?.trim() || '';
       console.log('🧠 Extracted text from image:', extractedText);
+
+      const match = extractedText.match(/(\d+)\.\s*(\d+)\^(\d+)/); // e.g. "1. 2^3"
+      if (match) {
+        const [, problemNum, base, exp] = match;
+        lastProblemText = `Problem ${problemNum} is \\(${base}^${exp}\\)`;
+        console.log('🔁 Set lastProblemText:', lastProblemText);
+      }
     } catch (err) {
       console.warn('⚠️ OCR failed:', err);
+      extractedText = '[Image received but text could not be extracted]';
     }
+  }
+
+  if (lastEditedProblem) {
+    contextText += `\nFocus your response on: ${lastEditedProblem}`;
   }
 
   const basePrompt = `
@@ -89,30 +94,44 @@ You are EMBER, the world’s best ${subject} tutor. You are warm, encouraging, a
 
 You specialize in ${subject} for grade ${grade}, especially standard ${standard}. You're helping a student named Sonja.
 
-Your tone is warm, responsive, and age-appropriate. Always scaffold slowly — only ask one question or make one comment at a time. Avoid long or complex instructions.
+Your tone is warm, responsive, and age-appropriate. Always scaffold slowly, assume I've never seen this material before. Only ask one short question or make one clear comment at a time.
 
-Use clear, inline LaTeX math like \\(2^3\\), and don’t give answers away. Gently guide Sonja to think through the next step herself.
+Use inline LaTeX like \\(2^3\\), and don’t give answers away. Gently guide Sonja to think through the next step herself.
+`;
 
-If Sonja types a question or makes a guess (e.g. "how?" or "2, 3 times?"), respond to it directly. Don’t ignore it or continue your plan.`;
+const messages = [
+    { role: 'system', content: basePrompt }
+  ];
+  
+  // 🧠 Add context and extracted text
+  if (contextText || extractedText) {
+    messages.push({
+      role: 'user',
+      content: `Worksheet context:\n${contextText}\n${extractedText}`
+    });
+  }
+  
+  // 📸 Always add image (even if user typed a message)
+  if (image) {
+    messages.push({
+      role: 'user',
+      content: [
+        { type: 'text', text: "Here is the worksheet image." },
+        { type: 'image_url', image_url: { url: image } }
+      ]
+    });
+  }
+  
+  // 💬 Always add the typed message last
+  if (isTypedMessage) {
+    messages.push({ role: 'user', content: message });
+  }
+  
 
   const payload = {
     model: 'gpt-4-turbo',
     temperature: 0.3,
-    messages: image
-      ? [
-          { role: 'system', content: basePrompt },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: `${message}\n\n${contextText.trim()}\n\nExtracted worksheet text:\n${extractedText}` },
-              { type: 'image_url', image_url: { url: image } }
-            ]
-          }
-        ]
-      : [
-          { role: 'system', content: basePrompt },
-          ...chatHistory
-        ]
+    messages
   };
 
   try {
@@ -128,69 +147,10 @@ If Sonja types a question or makes a guess (e.g. "how?" or "2, 3 times?"), respo
     const data = await openaiRes.json();
     let responseText = data?.choices?.[0]?.message?.content || "Oops! I didn’t get a response.";
 
-    // 🔁 Deduplication
-    if (isSimilar(responseText)) {
-      console.log('🔁 Rephrasing similar response...');
-      const rephraseRes = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'gpt-4-turbo',
-          messages: [
-            {
-              role: 'system',
-              content: "Respond to me as ember, as if you are standing over my shoulder watching my changes. You are EMBER, the worlds best math tutor. You are warm, encouraging, and extremely good at helping students learn through their thinking and problem solving. Youre helping a student named Sonja. Your tone is warm, responsive, and age-appropriate. Always scaffold slowly — only ask one question or make one comment at a time. Avoid long or complex instructions. Use clear, inline LaTeX math like \\(2^3\\), and don’t give answers away. Gently guide Sonja to think through the next step herself. If Sonja types a question or makes a guess, respond to it directly. Dont ignore it or continue your plan. Rephrase this to avoid repeating past ideas. Make it short and scaffolded. Use inline LaTeX like \\(2^3\\)."
-            },
-            { role: 'user', content: responseText }
-          ],
-          temperature: 0.3
-        })
-      });
-
-      const retryData = await rephraseRes.json();
-      responseText = retryData?.choices?.[0]?.message?.content || responseText;
-    }
-
-    // 🧠 Clarify student follow-up questions or guesses
-    const studentMsg = message.toLowerCase();
-    const isFollowUp = studentMsg.includes('?') || studentMsg.includes('how') || studentMsg.match(/\d.*times?/);
-    if (isFollowUp) {
-      console.log('🪄 Detected follow-up. Clarifying...');
-      const clarifyRes = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'gpt-4-turbo',
-          messages: [
-            {
-              role: 'system',
-              content: "The student asked a question or made a guess. Rewrite your reply to directly respond, kindly and clearly."
-            },
-            {
-              role: 'user',
-              content: `Student said: "${message}"\nTutor reply: "${responseText}"`
-            }
-          ],
-          temperature: 0.3
-        })
-      });
-
-      const clarifyData = await clarifyRes.json();
-      responseText = clarifyData?.choices?.[0]?.message?.content || responseText;
-    }
-
-    // ✅ Save final response
     chatHistory.push({ role: 'assistant', content: responseText });
     lastBotResponses.unshift(responseText);
     if (lastBotResponses.length > 3) lastBotResponses.pop();
 
-    // 🔊 Voice
     const spokenText = convertForSpeech(responseText);
     const voiceId = '21m00Tcm4TlvDq8ikWAM';
     const audioPath = path.join(__dirname, 'public', 'ember-response.mp3');
@@ -208,10 +168,7 @@ If Sonja types a question or makes a guess (e.g. "how?" or "2, 3 times?"), respo
       body: JSON.stringify({
         text: spokenText,
         model_id: "eleven_multilingual_v2",
-        voice_settings: {
-          stability: 0.4,
-          similarity_boost: 0.75
-        }
+        voice_settings: { stability: 0.4, similarity_boost: 0.75 }
       })
     });
 
@@ -240,7 +197,7 @@ If Sonja types a question or makes a guess (e.g. "how?" or "2, 3 times?"), respo
 app.get('/api/greet', async (req, res) => {
   try {
     const prompt = `
-You are EMBER, a cheerful and kind tutor. Say a one-sentence greeting to a student named Sonja who's starting a worksheet today. Be warm and supportive.`;
+You are EMBER, a cheerful and kind tutor. Say a one-sentence greeting to a student named Sonja who you are tutoring today. Be warm and supportive. Act like you’ve met Sonja before and keep it short, fun, and kid-appropriate.`;
 
     const greetRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -270,10 +227,7 @@ You are EMBER, a cheerful and kind tutor. Say a one-sentence greeting to a stude
       body: JSON.stringify({
         text: greetingText,
         model_id: "eleven_multilingual_v2",
-        voice_settings: {
-          stability: 0.4,
-          similarity_boost: 0.75
-        }
+        voice_settings: { stability: 0.4, similarity_boost: 0.75 }
       })
     });
 
